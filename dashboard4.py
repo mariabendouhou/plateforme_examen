@@ -9,12 +9,6 @@ from plotly.subplots import make_subplots
 # ==============================
 # CONFIGURATION
 # ==============================
-DB_CONFIG = {
-    "host": "localhost",
-    "user": "root",
-    "password": "maria2025@",
-    "database": "plateforme_examens"
-}
 
 DUREE_EXAM = 90
 CRENEAUX = ["08:30", "11:00", "14:00"]
@@ -127,11 +121,16 @@ if "user_dept_id" not in st.session_state:
 # ==============================
 def get_connection():
     try:
-        return mysql.connector.connect(**DB_CONFIG)
+        return mysql.connector.connect(
+            host=st.secrets["mysql"]["host"],
+            user=st.secrets["mysql"]["user"],
+            password=st.secrets["mysql"]["password"],
+            database=st.secrets["mysql"]["database"],
+            port=st.secrets["mysql"]["port"]
+        )
     except mysql.connector.Error as err:
         st.error(f"❌ Erreur de connexion : {err}")
         return None
-
 def execute_query(query, params=None):
     conn = get_connection()
     if not conn:
@@ -1040,4 +1039,5 @@ def main():
         dashboard_etudiant()
 
 if __name__ == "__main__":
+
     main()
