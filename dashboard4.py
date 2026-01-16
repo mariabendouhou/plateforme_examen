@@ -961,10 +961,6 @@ def dashboard_etudiant():
                         st.write(f"🏫 Salle: {exam['salle']}")
                         st.write(f"👨‍🏫 Prof: {exam['professeur']}")
                     
-                    with col3:
-                        st.write(f"👥 {int(exam['nb_inscrits'])} étudiants")
-                        st.write(f"⏱️ Durée: {int(exam['duree_minutes'])} min")
-                    
                     st.markdown('</div>', unsafe_allow_html=True)
                 
                 st.divider()
@@ -1012,6 +1008,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
