@@ -602,11 +602,11 @@ def page_connexion():
             formations = get_formations_by_dept()
             if not formations.empty:
                 formation_nom = st.selectbox("Formation", formations["nom"].tolist())
-                nom = st.text_input("Nom")
                 
                 if st.button("Se connecter", use_container_width=True):
                     formation_data = formations[formations["nom"] == formation_nom].iloc[0]
                     st.session_state.user_role = "etudiant"
+                    st.session_state.user_name = "Étudiant"
                     st.session_state.user_dept_id = formation_data["dept_id"]
                     st.rerun()
 # ==============================
@@ -1012,6 +1012,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
