@@ -562,51 +562,30 @@ def page_connexion():
         
         role = st.selectbox("Sélectionnez votre rôle", list(ROLES.values()))
         
-        if role == ROLES["vice_doyen"] or role == ROLES["admin_exams"]:
+        if role == ROLES["vice_doyen"]:
+            if st.button("Se connecter", use_container_width=True):
+                st.session_state.user_role = "vice_doyen"
+                st.session_state.user_name = "Vice-Doyen"
+                st.rerun()
+        
+        elif role == ROLES["admin_exams"]:
             nom = st.text_input("Nom d'utilisateur")
             if st.button("Se connecter", use_container_width=True):
-                st.session_state.user_role = list(ROLES.keys())[list(ROLES.values()).index(role)]
-                st.session_state.user_name = nom if nom else role
+                st.session_state.user_role = "admin_exams"
+                st.session_state.user_name = nom if nom else "Administrateur Examens"
                 st.rerun()
         
         elif role == ROLES["chef_dept"]:
             depts = get_departements()
             if not depts.empty:
                 dept_nom = st.selectbox("Département", depts["nom"].tolist())
-                nom = st.text_input("Nom")
                 
                 if st.button("Se connecter", use_container_width=True):
                     dept_id = depts[depts["nom"] == dept_nom]["id"].values[0]
                     st.session_state.user_role = "chef_dept"
-                    st.session_state.user_name = nom if nom else f"Chef {dept_nom}"
+                    st.session_state.user_name = f"Chef {dept_nom}"
                     st.session_state.user_dept_id = dept_id
                     st.rerun()
-        
-        elif role == ROLES["enseignant"]:
-            profs = get_professeurs_by_dept()
-            if not profs.empty:
-                prof_nom = st.selectbox("Sélectionnez votre nom", profs["nom"].tolist())
-                
-                if st.button("Se connecter", use_container_width=True):
-                    prof_data = profs[profs["nom"] == prof_nom].iloc[0]
-                    st.session_state.user_role = "enseignant"
-                    st.session_state.user_name = prof_nom
-                    st.session_state.user_dept_id = prof_data["dept_id"]
-                    st.rerun()
-        
-        elif role == ROLES["etudiant"]:
-            formations = get_formations_by_dept()
-            if not formations.empty:
-                formation_nom = st.selectbox("Formation", formations["nom"].tolist())
-                nom = st.text_input("Nom")
-                
-                if st.button("Se connecter", use_container_width=True):
-                    formation_data = formations[formations["nom"] == formation_nom].iloc[0]
-                    st.session_state.user_role = "etudiant"
-                    st.session_state.user_name = nom if nom else "Étudiant"
-                    st.session_state.user_dept_id = formation_data["dept_id"]
-                    st.rerun()
-
 # ==============================
 # DASHBOARD VICE-DOYEN / DOYEN
 # ==============================
