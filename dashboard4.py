@@ -569,7 +569,6 @@ def page_connexion():
                 st.rerun()
         
         elif role == ROLES["admin_exams"]:
-            nom = st.text_input("Nom d'utilisateur")
             if st.button("Se connecter", use_container_width=True):
                 st.session_state.user_role = "admin_exams"
                 st.session_state.user_name = "Administrateur Examens"
@@ -989,4 +988,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
