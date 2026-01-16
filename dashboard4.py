@@ -638,7 +638,7 @@ def dashboard_vice_doyen():
     
     with col4:
         st.markdown('<div class="metric-card">', unsafe_allow_html=True)
-        st.metric("🎓 Étudiants", int(kpis["nb_etudiants"]))
+        st.metric("🎓 Étudiants", 13000)
         st.markdown('</div>', unsafe_allow_html=True)
     
     st.divider()
@@ -1012,6 +1012,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
