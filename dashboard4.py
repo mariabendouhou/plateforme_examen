@@ -12,9 +12,9 @@ from plotly.subplots import make_subplots
 
 
 DUREE_EXAM = 90
-CRENEAUX = ["08:30", "11:00", "14:00","17:00"]
+CRENEAUX = ["08:30", "11:00", "14:00"]
 DATE_DEBUT = datetime(2026, 1, 10)
-DATE_FIN = datetime(2026, 1,20)
+DATE_FIN = datetime(2026, 1,25)
 
 # Configuration des rôles
 ROLES = {
@@ -1008,6 +1008,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
