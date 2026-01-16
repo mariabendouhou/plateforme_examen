@@ -585,6 +585,30 @@ def page_connexion():
                     st.session_state.user_name = f"Chef {dept_nom}"
                     st.session_state.user_dept_id = dept_id
                     st.rerun()
+         elif role == ROLES["enseignant"]:
+            profs = get_professeurs_by_dept()
+            if not profs.empty:
+                prof_nom = st.selectbox("Sélectionnez votre nom", profs["nom"].tolist())
+                
+                if st.button("Se connecter", use_container_width=True):
+                    prof_data = profs[profs["nom"] == prof_nom].iloc[0]
+                    st.session_state.user_role = "enseignant"
+                    st.session_state.user_name = prof_nom
+                    st.session_state.user_dept_id = prof_data["dept_id"]
+                    st.rerun()
+        
+         elif role == ROLES["etudiant"]:
+            formations = get_formations_by_dept()
+            if not formations.empty:
+                formation_nom = st.selectbox("Formation", formations["nom"].tolist())
+                nom = st.text_input("Nom")
+                
+                if st.button("Se connecter", use_container_width=True):
+                    formation_data = formations[formations["nom"] == formation_nom].iloc[0]
+                    st.session_state.user_role = "etudiant"
+                    st.session_state.user_name = nom if nom else "Étudiant"
+                    st.session_state.user_dept_id = formation_data["dept_id"]
+                    st.rerun()
 # ==============================
 # DASHBOARD VICE-DOYEN / DOYEN
 # ==============================
@@ -988,5 +1012,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
