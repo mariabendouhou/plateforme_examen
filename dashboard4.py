@@ -835,7 +835,6 @@ def dashboard_chef_dept():
                     st.write(f"📅 {exam['date_heure']} | 🏫 {exam['salle']} | 👨‍🏫 {exam['professeur']}")
                 
                 with col2:
-                    st.write(f"👥 {int(exam['nb_inscrits'])} étudiants")
                 
                 st.divider()
         
@@ -1008,6 +1007,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
