@@ -4,17 +4,15 @@ import pandas as pd
 from datetime import datetime, timedelta
 import plotly.express as px
 import plotly.graph_objects as go
-from plotly.subplots import make_subplots
 
 # ==============================
 # CONFIGURATION
 # ==============================
-
-
 DUREE_EXAM = 90
 CRENEAUX = ["08:30", "11:00", "14:00"]
 DATE_DEBUT = datetime(2026, 1, 10)
-DATE_FIN = datetime(2026, 1,25)
+DATE_FIN = datetime(2026, 1, 25)
+MAX_SALLES_PER_SLOT = 50   # Distribution équilibrée sur 45 créneaux
 
 # Configuration des rôles
 ROLES = {
@@ -32,7 +30,7 @@ st.set_page_config(
 )
 
 # ==============================
-# STYLES CSS PROFESSIONNELS
+# STYLES CSS
 # ==============================
 st.markdown("""
     <style>
@@ -61,35 +59,6 @@ st.markdown("""
         box-shadow: 0 2px 4px rgba(0,0,0,0.1);
         border-left: 4px solid #667eea;
     }
-    .success-alert {
-        background-color: #d4edda;
-        border-left: 5px solid #28a745;
-        padding: 15px;
-        border-radius: 5px;
-        margin: 10px 0;
-    }
-    .warning-alert {
-        background-color: #fff3cd;
-        border-left: 5px solid #ffc107;
-        padding: 15px;
-        border-radius: 5px;
-        margin: 10px 0;
-    }
-    .danger-alert {
-        background-color: #f8d7da;
-        border-left: 5px solid #dc3545;
-        padding: 15px;
-        border-radius: 5px;
-        margin: 10px 0;
-    }
-    .dept-section {
-        background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
-        padding: 15px;
-        border-radius: 10px;
-        color: white;
-        font-weight: bold;
-        margin: 15px 0;
-    }
     .kpi-container {
         background: linear-gradient(135deg, #fa709a 0%, #fee140 100%);
         padding: 20px;
@@ -104,11 +73,19 @@ st.markdown("""
         border-radius: 10px;
         margin: 15px 0;
     }
+    .dept-section {
+        background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+        padding: 15px;
+        border-radius: 10px;
+        color: white;
+        font-weight: bold;
+        margin: 15px 0;
+    }
     </style>
 """, unsafe_allow_html=True)
 
 # ==============================
-# GESTION SESSION & AUTHENTIFICATION
+# GESTION SESSION
 # ==============================
 if "user_role" not in st.session_state:
     st.session_state.user_role = None
@@ -138,7 +115,6 @@ def execute_query(query, params=None):
     if not conn:
         return pd.DataFrame()
     try:
-        # Convert numpy types to Python native types
         if params:
             import numpy as np
             params = tuple(
@@ -155,14 +131,14 @@ def execute_query(query, params=None):
         conn.close()
 
 # ==============================
-# REQUÊTES DONNÉES
+# REQUÊTES DONNÉES - OPTIMISÉES
 # ==============================
-@st.cache_data(ttl=30)
+@st.cache_data(ttl=300)
 def get_departements():
     query = "SELECT id, nom FROM departements ORDER BY nom"
     return execute_query(query)
 
-@st.cache_data(ttl=30)
+@st.cache_data(ttl=300)
 def get_formations_by_dept(dept_id=None):
     if dept_id:
         query = "SELECT id, nom FROM formations WHERE dept_id = %s ORDER BY nom"
@@ -170,7 +146,7 @@ def get_formations_by_dept(dept_id=None):
     query = "SELECT id, nom, dept_id FROM formations ORDER BY nom"
     return execute_query(query)
 
-@st.cache_data(ttl=30)
+@st.cache_data(ttl=300)
 def get_professeurs_by_dept(dept_id=None):
     if dept_id:
         query = "SELECT id, nom FROM professeurs WHERE dept_id = %s ORDER BY nom"
@@ -178,7 +154,7 @@ def get_professeurs_by_dept(dept_id=None):
     query = "SELECT id, nom, dept_id FROM professeurs ORDER BY nom"
     return execute_query(query)
 
-@st.cache_data(ttl=30)
+@st.cache_data(ttl=60)
 def load_edt_complete(dept_id=None, formation_id=None, date_filter=None):
     query = """
     SELECT 
@@ -221,9 +197,8 @@ def load_edt_complete(dept_id=None, formation_id=None, date_filter=None):
     """
     return execute_query(query, params=tuple(params) if params else None)
 
-@st.cache_data(ttl=30)
+@st.cache_data(ttl=60)
 def get_kpis_globaux():
-    """KPIs pour Vue Stratégique"""
     queries = {
         "nb_examens": "SELECT COUNT(*) as val FROM examens",
         "nb_salles": "SELECT COUNT(*) as val FROM lieux_examen",
@@ -253,7 +228,7 @@ def get_kpis_globaux():
         kpis[key] = float(result.iloc[0, 0]) if not result.empty else 0
     return kpis
 
-@st.cache_data(ttl=30)
+@st.cache_data(ttl=60)
 def get_occupation_globale():
     query = """
     SELECT 
@@ -277,7 +252,7 @@ def get_occupation_globale():
     """
     return execute_query(query)
 
-@st.cache_data(ttl=30)
+@st.cache_data(ttl=60)
 def get_stats_par_departement():
     query = """
     SELECT 
@@ -294,7 +269,7 @@ def get_stats_par_departement():
     """
     return execute_query(query)
 
-@st.cache_data(ttl=30)
+@st.cache_data(ttl=60)
 def get_heures_enseignement():
     query = """
     SELECT 
@@ -312,9 +287,8 @@ def get_heures_enseignement():
     """
     return execute_query(query)
 
-@st.cache_data(ttl=30)
+@st.cache_data(ttl=60)
 def get_edt_etudiant(formation_id):
-    """Retourne les examens d'une formation (examens auquel les étudiants sont inscrits)"""
     query = """
     SELECT DISTINCT
         e.id,
@@ -344,10 +318,184 @@ def get_edt_etudiant(formation_id):
     return execute_query(query, params=(formation_id,))
 
 # ==============================
+# GÉNÉRATION EDT ULTRA-OPTIMISÉE
+# ==============================
+def generer_edt_optimiser():
+    conn = get_connection()
+    if not conn:
+        return 0, 0
+
+    cur = conn.cursor(dictionary=True)
+
+    try:
+        # 1. Nettoyer EDT existant
+        cur.execute("DELETE FROM examens")
+        conn.commit()
+
+        # 2. Charger TOUS les modules (avec ou sans inscriptions)
+        cur.execute("""
+            SELECT 
+                m.id AS module_id,
+                m.nom AS module,
+                f.id AS formation_id,
+                f.dept_id AS dept_id,
+                COALESCE(COUNT(DISTINCT i.etudiant_id), 1) AS nb_etudiants
+            FROM modules m
+            JOIN formations f ON f.id = m.formation_id
+            LEFT JOIN inscriptions i ON i.module_id = m.id
+            GROUP BY m.id, m.nom, f.id, f.dept_id
+            ORDER BY nb_etudiants DESC
+        """)
+        modules = cur.fetchall()
+
+        # 3. Charger salles et professeurs
+        cur.execute("SELECT id, capacite, nom FROM lieux_examen ORDER BY capacite DESC")
+        salles = cur.fetchall()
+
+        cur.execute("SELECT id, nom FROM professeurs")
+        profs = cur.fetchall()
+
+        if not modules or not salles or not profs:
+            st.error("❌ Données insuffisantes")
+            return 0, 0
+
+        # 4. PRÉ-CHARGEMENT des étudiants (1 seule requête au lieu de 1500)
+        etudiants_par_module = {}
+        cur.execute("SELECT module_id, etudiant_id FROM inscriptions")
+        for row in cur.fetchall():
+            if row['module_id'] not in etudiants_par_module:
+                etudiants_par_module[row['module_id']] = []
+            etudiants_par_module[row['module_id']].append(row['etudiant_id'])
+
+        # 5. Interface de progression
+        progress_bar = st.progress(0)
+        status_text = st.empty()
+
+        # 6. Contraintes mémoire
+        formation_jour = {}
+        salle_horaire = {}
+        etudiant_jour = {}
+        salles_occupees_par_slot = {}
+        prof_exams_count = {p["id"]: 0 for p in profs}
+
+        success = 0
+        failed = 0
+        failed_modules = []
+        exams_to_insert = []  # BATCH INSERT
+
+        # 7. ALGORITHME PRINCIPAL
+        for i, module in enumerate(modules):
+            # Mise à jour progression
+            progress = (i + 1) / len(modules)
+            progress_bar.progress(progress)
+            status_text.text(f"⏳ Planification: {module['module']} ({i+1}/{len(modules)})")
+
+            planifie = False
+            etudiants_module = etudiants_par_module.get(module["module_id"], [])
+
+            # ROUND ROBIN pour distribution équilibrée des créneaux
+            start_idx = i % len(CRENEAUX)
+            creneaux_priority = CRENEAUX[start_idx:] + CRENEAUX[:start_idx]
+
+            for jour_offset in range((DATE_FIN - DATE_DEBUT).days + 1):
+                if planifie:
+                    break
+                    
+                date_exam = (DATE_DEBUT + timedelta(days=jour_offset)).date()
+
+                # 1 examen par formation par jour
+                if (module["formation_id"], date_exam) in formation_jour:
+                    continue
+
+                for heure in creneaux_priority:
+                    if planifie:
+                        break
+                        
+                    dt = datetime.strptime(f"{date_exam} {heure}", "%Y-%m-%d %H:%M")
+
+                    # Distribution équilibrée (max 35 salles par créneau)
+                    if salles_occupees_par_slot.get(dt, 0) >= MAX_SALLES_PER_SLOT:
+                        continue
+
+                    # Conflit étudiants
+                    if any((etud_id, date_exam) in etudiant_jour for etud_id in etudiants_module):
+                        continue
+
+                    for salle in salles:
+                        if planifie:
+                            break
+
+                        # Capacité suffisante
+                        if salle["capacite"] < module["nb_etudiants"]:
+                            continue
+
+                        # Salle disponible
+                        if (salle["id"], dt) in salle_horaire:
+                            continue
+
+                        # Prof le moins chargé
+                        prof_trouve = sorted(profs, key=lambda p: prof_exams_count[p["id"]])[0]
+
+                        # AJOUT À LA LISTE (pas d'insertion immédiate)
+                        exams_to_insert.append((
+                            module["module_id"],
+                            prof_trouve["id"],
+                            salle["id"],
+                            dt,
+                            DUREE_EXAM
+                        ))
+
+                        # Mise à jour contraintes
+                        salle_horaire[(salle["id"], dt)] = True
+                        formation_jour[(module["formation_id"], date_exam)] = True
+                        salles_occupees_par_slot[dt] = salles_occupees_par_slot.get(dt, 0) + 1
+                        prof_exams_count[prof_trouve["id"]] += 1
+                        
+                        for etud_id in etudiants_module:
+                            etudiant_jour[(etud_id, date_exam)] = True
+
+                        success += 1
+                        planifie = True
+
+            if not planifie:
+                failed += 1
+                failed_modules.append(module["module"])
+
+        # 8. BATCH INSERT (1 seule insertion pour tout)
+        if exams_to_insert:
+            cur.executemany("""
+                INSERT INTO examens (module_id, prof_id, lieu_id, date_heure, duree_minutes)
+                VALUES (%s, %s, %s, %s, %s)
+            """, exams_to_insert)
+            conn.commit()
+
+        progress_bar.empty()
+        status_text.empty()
+
+        # Afficher modules non planifiés
+        if failed_modules:
+            with st.expander(f"⚠️ Modules non planifiés ({failed})"):
+                for mod in failed_modules[:20]:  # Limite affichage
+                    st.write(f"- {mod}")
+                if failed > 20:
+                    st.write(f"... et {failed - 20} autres")
+
+        return success, failed
+
+    except Exception as e:
+        conn.rollback()
+        st.error(f"❌ Erreur génération : {e}")
+        import traceback
+        st.error(traceback.format_exc())
+        return 0, 0
+
+    finally:
+        conn.close()
+
+# ==============================
 # FONCTIONS MÉTIER
 # ==============================
 def valider_examen(examen_id, type_validation):
-    """Valide un examen (chef ou doyen)"""
     conn = get_connection()
     if not conn:
         return False
@@ -366,191 +514,8 @@ def valider_examen(examen_id, type_validation):
     finally:
         conn.close()
 
-def generer_edt_optimiser():
-    conn = get_connection()
-    if not conn:
-        return 0, 0
-
-    cur = conn.cursor(dictionary=True)
-
-    try:
-        # Nettoyer l'EDT existant
-        cur.execute("DELETE FROM examens")
-        conn.commit()
-
-        # Charger modules avec formation, département et promo + nombre d'étudiants
-        cur.execute("""
-            SELECT 
-                m.id AS module_id,
-                m.nom AS module,
-                f.id AS formation_id,
-                f.dept_id AS dept_id,
-                COALESCE(MIN(e.promo), 2024) AS promo,
-                COUNT(DISTINCT i.etudiant_id) AS nb_etudiants
-            FROM modules m
-            JOIN formations f ON f.id = m.formation_id
-            LEFT JOIN inscriptions i ON i.module_id = m.id
-            LEFT JOIN etudiants e ON e.id = i.etudiant_id
-            GROUP BY m.id, m.nom, f.id, f.dept_id
-            ORDER BY nb_etudiants DESC
-        """)
-        modules = cur.fetchall()
-
-        # Salles par capacité
-        cur.execute("SELECT id, capacite, nom FROM lieux_examen ORDER BY capacite DESC")
-        salles = cur.fetchall()
-
-        # Professeurs par département
-        cur.execute("SELECT id, dept_id, nom FROM professeurs ORDER BY dept_id")
-        profs = cur.fetchall()
-
-        if not modules or not salles or not profs:
-            st.error("❌ Données insuffisantes (modules / salles / professeurs)")
-            return 0, 0
-
-        success = 0
-        failed = 0
-        failed_modules = []
-
-        # Mémoire pour contraintes
-        formation_jour = {}
-        salle_jour_promo_formation = {}
-        prof_jour = {}
-        etudiant_jour = {}
-        salle_horaire = {}
-        
-        # Compteur global d'examens par professeur pour équité
-        prof_exams_count = {prof["id"]: 0 for prof in profs}
-
-        # Charger les étudiants par module
-        etudiants_par_module = {}
-        for module in modules:
-            cur.execute("""
-                SELECT etudiant_id 
-                FROM inscriptions 
-                WHERE module_id = %s
-            """, (module["module_id"],))
-            etudiants_par_module[module["module_id"]] = [r["etudiant_id"] for r in cur.fetchall()]
-
-        for module in modules:
-            planifie = False
-
-            for jour_offset in range((DATE_FIN - DATE_DEBUT).days + 1):
-                if planifie:
-                    break
-                    
-                date_exam = (DATE_DEBUT + timedelta(days=jour_offset)).date()
-
-                # 1 examen par formation par jour
-                if (module["formation_id"], date_exam) in formation_jour:
-                    continue
-
-                for heure in CRENEAUX:
-                    if planifie:
-                        break
-                        
-                    dt = datetime.strptime(f"{date_exam} {heure}", "%Y-%m-%d %H:%M")
-
-                    # Vérifier conflits étudiants
-                    etudiants_module = etudiants_par_module.get(module["module_id"], [])
-                    conflit_etudiant = False
-                    for etud_id in etudiants_module:
-                        if (etud_id, date_exam) in etudiant_jour:
-                            conflit_etudiant = True
-                            break
-                    
-                    if conflit_etudiant:
-                        continue
-
-                    for salle in salles:
-                        # Capacité suffisante
-                        if salle["capacite"] < module["nb_etudiants"]:
-                            continue
-
-                        # Salle pour une seule formation/promo par jour
-                        salle_key = (salle["id"], date_exam)
-                        if salle_key in salle_jour_promo_formation:
-                            existing_promo, existing_formation = salle_jour_promo_formation[salle_key]
-                            if existing_promo != module["promo"] or existing_formation != module["formation_id"]:
-                                continue
-
-                        # Disponibilité horaire
-                        if (salle["id"], dt) in salle_horaire:
-                            continue
-
-                        # Trouver prof disponible avec distribution équitable
-                        prof_trouve = None
-                        
-                        # Trier les profs par nombre total d'examens (équité globale)
-                        profs_tries = sorted(profs, key=lambda p: prof_exams_count[p["id"]])
-                        
-                        for prof in profs_tries:
-                            nb_exams_prof = prof_jour.get((prof["id"], date_exam), 0)
-                            if nb_exams_prof < 3:  # Max 3 examens par jour
-                                prof_trouve = prof
-                                break
-                        
-                        if not prof_trouve:
-                            continue
-
-                        # INSERTION
-                        try:
-                            cur.execute("""
-                                INSERT INTO examens
-                                (module_id, prof_id, lieu_id, date_heure, duree_minutes)
-                                VALUES (%s, %s, %s, %s, %s)
-                            """, (
-                                module["module_id"],
-                                prof_trouve["id"],
-                                salle["id"],
-                                dt,
-                                DUREE_EXAM
-                            ))
-                            conn.commit()
-
-                            # Mise à jour contraintes
-                            formation_jour[(module["formation_id"], date_exam)] = True
-                            salle_jour_promo_formation[salle_key] = (module["promo"], module["formation_id"])
-                            prof_jour[(prof_trouve["id"], date_exam)] = nb_exams_prof + 1
-                            prof_exams_count[prof_trouve["id"]] += 1  # Mise à jour compteur global
-                            salle_horaire[(salle["id"], dt)] = True
-                            
-                            for etud_id in etudiants_module:
-                                etudiant_jour[(etud_id, date_exam)] = True
-
-                            success += 1
-                            planifie = True
-                            break
-                            
-                        except mysql.connector.Error:
-                            conn.rollback()
-                            continue
-
-            if not planifie:
-                failed += 1
-                failed_modules.append(module["module"])
-
-        # Afficher modules non planifiés
-        if failed_modules:
-            with st.expander(f"⚠️ Modules non planifiés ({failed})"):
-                for mod in failed_modules:
-                    st.write(f"- {mod}")
-
-        return success, failed
-
-    except Exception as e:
-        conn.rollback()
-        st.error(f"❌ Erreur génération EDT : {e}")
-        import traceback
-        st.error(traceback.format_exc())
-        return 0, 0
-
-    finally:
-        conn.close()
-
-
 # ==============================
-# PAGE DE CONNEXION
+# PAGE CONNEXION
 # ==============================
 def page_connexion():
     st.markdown('<div class="main-header"><h1>🎓 Plateforme de Gestion des Examens</h1><p>Connexion Multi-Acteurs</p></div>', unsafe_allow_html=True)
@@ -609,13 +574,13 @@ def page_connexion():
                     st.session_state.user_name = "Étudiant"
                     st.session_state.user_dept_id = formation_data["dept_id"]
                     st.rerun()
+
 # ==============================
-# DASHBOARD VICE-DOYEN / DOYEN
+# DASHBOARDS
 # ==============================
 def dashboard_vice_doyen():
     st.markdown(f'<div class="main-header"><h1>📊 Vue Stratégique Globale</h1><div class="role-badge">{ROLES["vice_doyen"]} - {st.session_state.user_name}</div></div>', unsafe_allow_html=True)
     
-    # KPIs Globaux
     kpis = get_kpis_globaux()
     
     st.markdown("### 📈 Indicateurs Clés de Performance")
@@ -652,13 +617,12 @@ def dashboard_vice_doyen():
     
     with col2:
         st.markdown('<div class="kpi-container">', unsafe_allow_html=True)
-        st.metric("⚠️ Conflits Professeurs", 0)
+        st.metric("⚠️ Conflits Professeurs", int(kpis["nb_conflits_profs"]))
         st.markdown('</div>', unsafe_allow_html=True)
     
     st.divider()
     
-    # Occupation globale des salles
-    st.markdown("### 🏢 Occupation Globale des Amphithéâtres et Salles")
+    st.markdown("### 🏢 Occupation Globale des Salles")
     occupation = get_occupation_globale()
     
     if not occupation.empty:
@@ -668,80 +632,42 @@ def dashboard_vice_doyen():
             y="taux_occupation",
             color="taux_occupation",
             color_continuous_scale="RdYlGn_r",
-            labels={"salle": "Salle", "taux_occupation": "Taux d'occupation (%)"},
-            title="Taux d'occupation par salle"
+            labels={"salle": "Salle", "taux_occupation": "Taux d'occupation (%)"}
         )
         st.plotly_chart(fig, use_container_width=True)
-        
         st.dataframe(occupation, use_container_width=True)
     
     st.divider()
     
-    # Stats par département
     st.markdown("### 📊 Statistiques par Département")
     stats_dept = get_stats_par_departement()
     
     if not stats_dept.empty:
-        fig = px.bar(
-            stats_dept,
-            x="departement",
-            y="nb_examens",
-            title="Examens par Département",
-            labels={"departement": "Département", "nb_examens": "Nombre d'examens"}
-        )
+        fig = px.bar(stats_dept, x="departement", y="nb_examens", title="Examens par Département")
         st.plotly_chart(fig, use_container_width=True)
-        
         st.dataframe(stats_dept, use_container_width=True)
     
     st.divider()
     
-    # Heures d'enseignement
     st.markdown("### ⏰ Charge de Travail Professeurs")
     heures = get_heures_enseignement()
     
     if not heures.empty:
-        fig = px.scatter(
-            heures,
-            x="nb_examens",
-            y="heures_totales",
-            size="nb_surveillances",
-            color="departement",
-            hover_name="professeur",
-            labels={"nb_examens": "Nombre d'examens", "heures_totales": "Heures totales"}
-        )
+        fig = px.scatter(heures, x="nb_examens", y="heures_totales", size="nb_surveillances", 
+                        color="departement", hover_name="professeur")
         st.plotly_chart(fig, use_container_width=True)
-        
         st.dataframe(heures, use_container_width=True)
-    
-    st.divider()
-    
-    # Validation finale EDT
-    st.markdown("### ✅ Validation Finale de l'Emploi du Temps")
-    st.markdown('<div class="validation-box">', unsafe_allow_html=True)
-    
-    edt = load_edt_complete()
-    
-    if not edt.empty:
-        st.info(f"📋 Total: {len(edt)} examens planifiés")
-    else:
-        st.info("Aucun examen planifié")
-    
-    st.markdown('</div>', unsafe_allow_html=True)
 
-# ==============================
-# DASHBOARD ADMIN EXAMENS
-# ==============================
 def dashboard_admin_examens():
     st.markdown(f'<div class="main-header"><h1>🛠️ Administration et Planification</h1><div class="role-badge">{ROLES["admin_exams"]} - {st.session_state.user_name}</div></div>', unsafe_allow_html=True)
     
-    # Actions principales
     st.markdown("### ⚙️ Actions de Planification")
     
     col1, col2, col3 = st.columns(3)
     
     with col1:
         if st.button("🚀 Générer EDT Complet", use_container_width=True):
-            with st.spinner("⏳ Génération en cours (tous les modules)..."):
+            with st.spinner("⏳ Génération en cours..."):
                 import time
                 start = time.time()
                 success, failed = generer_edt_optimiser()
@@ -753,7 +679,7 @@ def dashboard_admin_examens():
                 st.success(f"✅ {success}/{total} modules planifiés ({taux:.1f}%) en {elapsed:.2f}s")
                 
                 if failed > 0:
-                    st.warning(f"⚠️ {failed} modules non planifiés (capacité insuffisante)")
+                    st.warning(f"⚠️ {failed} modules non planifiés")
                 else:
                     st.balloons()
                     
@@ -780,7 +706,6 @@ def dashboard_admin_examens():
     
     st.divider()
     
-    # Vue complète EDT
     st.markdown("### 📋 Emploi du Temps Complet")
     
     edt = load_edt_complete()
@@ -798,15 +723,10 @@ def dashboard_admin_examens():
     else:
         st.info("Aucun examen planifié")
 
-# ==============================
-# DASHBOARD CHEF DE DÉPARTEMENT
-# ==============================
 def dashboard_chef_dept():
     st.markdown(f'<div class="main-header"><h1>📂 Gestion Département</h1><div class="role-badge">{ROLES["chef_dept"]} - {st.session_state.user_name}</div></div>', unsafe_allow_html=True)
     
     dept_id = st.session_state.user_dept_id
-    
-    # EDT du département
     edt_dept = load_edt_complete(dept_id=dept_id)
     
     if not edt_dept.empty:
@@ -819,63 +739,43 @@ def dashboard_chef_dept():
         
         st.divider()
         
-        # Validation par formation
         st.markdown("### ✅ Examens par Formation")
         
         for formation in edt_dept["formation"].unique():
             st.markdown(f"#### 📚 {formation}")
-            
             formation_data = edt_dept[edt_dept["formation"] == formation]
             
             for _, exam in formation_data.iterrows():
-                col1, col2, col3 = st.columns([3, 1, 1])
-                
+                col1, col2 = st.columns([3, 1])
                 with col1:
                     st.write(f"**{exam['module']}**")
                     st.write(f"📅 {exam['date_heure']} | 🏫 {exam['salle']} | 👨‍🏫 {exam['professeur']}")
-                
                 st.divider()
         
         st.divider()
         
-        # Statistiques département
         st.markdown("### 📊 Statistiques du Département")
-        
         col1, col2 = st.columns(2)
         
         with col1:
-            # Examens par jour
             edt_dept["date"] = pd.to_datetime(edt_dept["date_heure"]).dt.date
             exams_par_jour = edt_dept.groupby("date").size().reset_index(name="nb_examens")
-            
             fig = px.bar(exams_par_jour, x="date", y="nb_examens", title="Examens par jour")
             st.plotly_chart(fig, use_container_width=True)
         
         with col2:
-            # Examens par formation
             exams_par_formation = edt_dept.groupby("formation").size().reset_index(name="nb_examens")
-            
-            fig = px.pie(exams_par_formation, values="nb_examens", names="formation", title="Répartition par formation")
+            fig = px.pie(exams_par_formation, values="nb_examens", names="formation", title="Répartition")
             st.plotly_chart(fig, use_container_width=True)
     else:
         st.info("Aucun examen planifié pour ce département")
 
-# ==============================
-# DASHBOARD ENSEIGNANT
-# ==============================
 def dashboard_enseignant():
     st.markdown(f'<div class="main-header"><h1>👨‍🏫 Mon Planning</h1><div class="role-badge">{ROLES["enseignant"]} - {st.session_state.user_name}</div></div>', unsafe_allow_html=True)
     
-    # Récupérer les examens de l'enseignant
     query = """
-    SELECT 
-        e.id,
-        m.nom AS module,
-        f.nom AS formation,
-        d.nom AS departement,
-        l.nom AS salle,
-        e.date_heure,
-        COUNT(DISTINCT i.etudiant_id) AS nb_inscrits
+    SELECT e.id, m.nom AS module, f.nom AS formation, d.nom AS departement,
+           l.nom AS salle, e.date_heure, COUNT(DISTINCT i.etudiant_id) AS nb_inscrits
     FROM examens e
     JOIN modules m ON m.id = e.module_id
     JOIN formations f ON f.id = m.formation_id
@@ -892,7 +792,6 @@ def dashboard_enseignant():
     
     if not mes_examens.empty:
         st.metric("📘 Mes Examens à Surveiller", len(mes_examens))
-        
         st.divider()
         
         st.markdown("### 📅 Planning de Mes Examens")
@@ -914,13 +813,9 @@ def dashboard_enseignant():
     else:
         st.info("Aucun examen planifié pour le moment")
 
-# ==============================
-# DASHBOARD ÉTUDIANT
-# ==============================
 def dashboard_etudiant():
     st.markdown(f'<div class="main-header"><h1>🎓 Mon Calendrier d\'Examens</h1><div class="role-badge">{ROLES["etudiant"]} - {st.session_state.user_name}</div></div>', unsafe_allow_html=True)
     
-    # Filtres
     formations = get_formations_by_dept(st.session_state.user_dept_id)
     
     if not formations.empty:
@@ -929,12 +824,10 @@ def dashboard_etudiant():
         
         st.divider()
         
-        # Examens de la formation
         edt_formation = get_edt_etudiant(formation_id)
         
         if not edt_formation.empty:
             st.metric("📘 Mes Examens", len(edt_formation))
-            
             st.divider()
             
             st.markdown("### 📅 Calendrier de Mes Examens")
@@ -943,12 +836,11 @@ def dashboard_etudiant():
             
             for date in sorted(edt_formation["date"].unique()):
                 st.markdown(f"#### 📅 {date.strftime('%A %d %B %Y')}")
-                
                 examens_jour = edt_formation[edt_formation["date"] == date]
                 
                 for _, exam in examens_jour.iterrows():
                     st.markdown(f'<div class="validation-box">', unsafe_allow_html=True)
-                    col1, col2, col3 = st.columns(3)
+                    col1, col2 = st.columns(2)
                     
                     with col1:
                         st.write(f"**⏰ {exam['date_heure'].strftime('%H:%M')}**")
@@ -962,7 +854,6 @@ def dashboard_etudiant():
                 
                 st.divider()
             
-            # Export personnel
             csv = edt_formation.to_csv(index=False).encode('utf-8')
             st.download_button("📥 Télécharger Mon Calendrier", csv, "mes_examens.csv", "text/csv")
         else:
@@ -974,7 +865,6 @@ def dashboard_etudiant():
 # NAVIGATION PRINCIPALE
 # ==============================
 def main():
-    # Sidebar
     with st.sidebar:
         if st.session_state.user_role:
             st.markdown(f"### 👤 Connecté en tant que:")
@@ -989,7 +879,6 @@ def main():
                 st.session_state.user_dept_id = None
                 st.rerun()
     
-    # Routing selon le rôle
     if not st.session_state.user_role:
         page_connexion()
     elif st.session_state.user_role == "vice_doyen":
@@ -1005,16 +894,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
-
-
-
-
-
-
-
-
-
-
-
