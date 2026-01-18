@@ -178,6 +178,7 @@ def get_professeurs_by_dept(dept_id=None):
 
 @st.cache_data(ttl=60)  # 1 minute pour EDT (données qui changent)
 def load_edt_complete(dept_id=None, formation_id=None, date_filter=None):
+    # Optimisation: Utiliser FORCE INDEX pour garantir l'usage des index
     query = """
     SELECT 
         e.id,
@@ -192,13 +193,13 @@ def load_edt_complete(dept_id=None, formation_id=None, date_filter=None):
         COUNT(DISTINCT i.etudiant_id) AS nb_inscrits,
         d.nom AS departement,
         d.id AS departement_id
-    FROM examens e
+    FROM examens e FORCE INDEX (idx_exam_date, idx_exam_prof, idx_exam_lieu)
     JOIN modules m ON m.id = e.module_id
     JOIN formations f ON f.id = m.formation_id
     JOIN departements d ON d.id = f.dept_id
     JOIN professeurs p ON p.id = e.prof_id
     JOIN lieux_examen l ON l.id = e.lieu_id
-    LEFT JOIN inscriptions i ON i.module_id = e.module_id
+    LEFT JOIN inscriptions i FORCE INDEX (idx_insc_module) ON i.module_id = e.module_id
     WHERE 1=1
     """
     params = []
@@ -221,7 +222,7 @@ def load_edt_complete(dept_id=None, formation_id=None, date_filter=None):
 
 @st.cache_data(ttl=60)
 def get_kpis_globaux():
-    """KPIs pour Vue Stratégique"""
+    """KPIs pour Vue Stratégique - Optimisé avec index"""
     queries = {
         "nb_examens": "SELECT COUNT(*) as val FROM examens",
         "nb_salles": "SELECT COUNT(*) as val FROM lieux_examen",
@@ -229,16 +230,20 @@ def get_kpis_globaux():
         "nb_etudiants": "SELECT COUNT(*) as val FROM etudiants",
         "nb_conflits_salles": """
             SELECT COUNT(*) as val FROM (
-                SELECT e1.id FROM examens e1
-                JOIN examens e2 ON e1.lieu_id = e2.lieu_id AND e1.id < e2.id
+                SELECT e1.id 
+                FROM examens e1 FORCE INDEX (idx_exam_lieu, idx_exam_date)
+                JOIN examens e2 FORCE INDEX (idx_exam_lieu, idx_exam_date) 
+                ON e1.lieu_id = e2.lieu_id AND e1.id < e2.id
                 WHERE e1.date_heure < DATE_ADD(e2.date_heure, INTERVAL e2.duree_minutes MINUTE)
                 AND DATE_ADD(e1.date_heure, INTERVAL e1.duree_minutes MINUTE) > e2.date_heure
             ) conflicts
         """,
         "nb_conflits_profs": """
             SELECT COUNT(*) as val FROM (
-                SELECT e1.id FROM examens e1
-                JOIN examens e2 ON e1.prof_id = e2.prof_id AND e1.id < e2.id
+                SELECT e1.id 
+                FROM examens e1 FORCE INDEX (idx_exam_prof, idx_exam_date)
+                JOIN examens e2 FORCE INDEX (idx_exam_prof, idx_exam_date) 
+                ON e1.prof_id = e2.prof_id AND e1.id < e2.id
                 WHERE e1.date_heure < DATE_ADD(e2.date_heure, INTERVAL e2.duree_minutes MINUTE)
                 AND DATE_ADD(e1.date_heure, INTERVAL e1.duree_minutes MINUTE) > e2.date_heure
             ) conflicts
@@ -649,7 +654,7 @@ def dashboard_vice_doyen():
     
     with col2:
         st.markdown('<div class="kpi-container">', unsafe_allow_html=True)
-        st.metric("⚠️ Conflits Professeurs", 0)
+        st.metric("⚠️ Conflits Professeurs", int(kpis["nb_conflits_profs"]))
         st.markdown('</div>', unsafe_allow_html=True)
     
     st.divider()
@@ -709,27 +714,12 @@ def dashboard_vice_doyen():
         st.plotly_chart(fig, use_container_width=True)
         
         st.dataframe(heures, use_container_width=True)
-    
-    st.divider()
-    
-    # Validation finale EDT
-    st.markdown("### ✅ Validation Finale de l'Emploi du Temps")
-    st.markdown('<div class="validation-box">', unsafe_allow_html=True)
-    
-    edt = load_edt_complete()
-    
-    if not edt.empty:
-        st.info(f"📋 Total: {len(edt)} examens planifiés")
-    else:
-        st.info("Aucun examen planifié")
-    
-    st.markdown('</div>', unsafe_allow_html=True)
 
 # ==============================
 # DASHBOARD ADMIN EXAMENS
 # ==============================
 def dashboard_admin_examens():
-    st.markdown(f'<div class="main-header"><h1>🛠️ Administration et Planification</h1><div class="role-badge">{ROLES["admin_exams"]} - {st.session_state.user_name}</div></div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="main-header"><h1>🛠️ Administration et Planificationallow_html=True)
     
     # Actions principales
     st.markdown("### ⚙️ Actions de Planification")
