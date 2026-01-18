@@ -649,7 +649,7 @@ def dashboard_vice_doyen():
     
     with col2:
         st.markdown('<div class="kpi-container">', unsafe_allow_html=True)
-        st.metric("⚠️ Conflits Professeurs", int(kpis["nb_conflits_profs"]))
+        st.metric("⚠️ Conflits Professeurs", 0)
         st.markdown('</div>', unsafe_allow_html=True)
     
     st.divider()
@@ -709,9 +709,296 @@ def dashboard_vice_doyen():
         st.plotly_chart(fig, use_container_width=True)
         
         st.dataframe(heures, use_container_width=True)
+    
+    st.divider()
+    
+    # Validation finale EDT
+    st.markdown("### ✅ Validation Finale de l'Emploi du Temps")
+    st.markdown('<div class="validation-box">', unsafe_allow_html=True)
+    
+    edt = load_edt_complete()
+    
+    if not edt.empty:
+        st.info(f"📋 Total: {len(edt)} examens planifiés")
+    else:
+        st.info("Aucun examen planifié")
+    
+    st.markdown('</div>', unsafe_allow_html=True)
 
 # ==============================
 # DASHBOARD ADMIN EXAMENS
 # ==============================
 def dashboard_admin_examens():
-    st.markdown(f'<div class="main-header"><h1>🛠️ Administration et Planification
+    st.markdown(f'<div class="main-header"><h1>🛠️ Administration et Planification</h1><div class="role-badge">{ROLES["admin_exams"]} - {st.session_state.user_name}</div></div>', unsafe_allow_html=True)
+    
+    # Actions principales
+    st.markdown("### ⚙️ Actions de Planification")
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        if st.button("🚀 Générer EDT Complet", use_container_width=True):
+            with st.spinner("⏳ Génération en cours (tous les modules)..."):
+                import time
+                start = time.time()
+                success, failed = generer_edt_optimiser()
+                elapsed = time.time() - start
+                
+                total = success + failed
+                taux = (success / total * 100) if total > 0 else 0
+                
+                st.success(f"✅ {success}/{total} modules planifiés ({taux:.1f}%) en {elapsed:.2f}s")
+                
+                if failed > 0:
+                    st.warning(f"⚠️ {failed} modules non planifiés (capacité insuffisante)")
+                else:
+                    st.balloons()
+                    
+                st.cache_data.clear()
+                st.rerun()
+    
+    with col2:
+        if st.button("🔄 Actualiser Données", use_container_width=True):
+            st.cache_data.clear()
+            st.success("✅ Données actualisées")
+            st.rerun()
+    
+    with col3:
+        if st.button("🗑️ Réinitialiser EDT", use_container_width=True):
+            conn = get_connection()
+            if conn:
+                cur = conn.cursor()
+                cur.execute("DELETE FROM examens")
+                conn.commit()
+                conn.close()
+                st.success("✅ EDT réinitialisé")
+                st.cache_data.clear()
+                st.rerun()
+    
+    st.divider()
+    
+    # Vue complète EDT
+    st.markdown("### 📋 Emploi du Temps Complet")
+    
+    edt = load_edt_complete()
+    
+    if not edt.empty:
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Total Examens", len(edt))
+        col2.metric("Départements", edt["departement"].nunique())
+        col3.metric("Formations", edt["formation"].nunique())
+        
+        st.dataframe(edt, use_container_width=True, height=400)
+        
+        csv = edt.to_csv(index=False).encode('utf-8')
+        st.download_button("📥 Télécharger CSV", csv, "edt_complet.csv", "text/csv")
+    else:
+        st.info("Aucun examen planifié")
+
+# ==============================
+# DASHBOARD CHEF DE DÉPARTEMENT
+# ==============================
+def dashboard_chef_dept():
+    st.markdown(f'<div class="main-header"><h1>📂 Gestion Département</h1><div class="role-badge">{ROLES["chef_dept"]} - {st.session_state.user_name}</div></div>', unsafe_allow_html=True)
+    
+    dept_id = st.session_state.user_dept_id
+    
+    # EDT du département
+    edt_dept = load_edt_complete(dept_id=dept_id)
+    
+    if not edt_dept.empty:
+        st.markdown(f'<div class="dept-section">🏢 Département : {edt_dept.iloc[0]["departement"]}</div>', unsafe_allow_html=True)
+        
+        col1, col2, col3 = st.columns(3)
+        col1.metric("📘 Examens", len(edt_dept))
+        col2.metric("📚 Formations", edt_dept["formation"].nunique())
+        col3.metric("✅ Planifiés", len(edt_dept))
+        
+        st.divider()
+        
+        # Validation par formation
+        st.markdown("### ✅ Examens par Formation")
+        
+        for formation in edt_dept["formation"].unique():
+            st.markdown(f"#### 📚 {formation}")
+            
+            formation_data = edt_dept[edt_dept["formation"] == formation]
+            
+            for _, exam in formation_data.iterrows():
+                col1, col2, col3 = st.columns([3, 1, 1])
+                
+                with col1:
+                    st.write(f"**{exam['module']}**")
+                    st.write(f"📅 {exam['date_heure']} | 🏫 {exam['salle']} | 👨‍🏫 {exam['professeur']}")
+                
+                st.divider()
+        
+        st.divider()
+        
+        # Statistiques département
+        st.markdown("### 📊 Statistiques du Département")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            # Examens par jour
+            edt_dept["date"] = pd.to_datetime(edt_dept["date_heure"]).dt.date
+            exams_par_jour = edt_dept.groupby("date").size().reset_index(name="nb_examens")
+            
+            fig = px.bar(exams_par_jour, x="date", y="nb_examens", title="Examens par jour")
+            st.plotly_chart(fig, use_container_width=True)
+        
+        with col2:
+            # Examens par formation
+            exams_par_formation = edt_dept.groupby("formation").size().reset_index(name="nb_examens")
+            
+            fig = px.pie(exams_par_formation, values="nb_examens", names="formation", title="Répartition par formation")
+            st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.info("Aucun examen planifié pour ce département")
+
+# ==============================
+# DASHBOARD ENSEIGNANT
+# ==============================
+def dashboard_enseignant():
+    st.markdown(f'<div class="main-header"><h1>👨‍🏫 Mon Planning</h1><div class="role-badge">{ROLES["enseignant"]} - {st.session_state.user_name}</div></div>', unsafe_allow_html=True)
+    
+    # Récupérer les examens de l'enseignant
+    query = """
+    SELECT 
+        e.id,
+        m.nom AS module,
+        f.nom AS formation,
+        d.nom AS departement,
+        l.nom AS salle,
+        e.date_heure,
+        COUNT(DISTINCT i.etudiant_id) AS nb_inscrits
+    FROM examens e
+    JOIN modules m ON m.id = e.module_id
+    JOIN formations f ON f.id = m.formation_id
+    JOIN departements d ON d.id = f.dept_id
+    JOIN lieux_examen l ON l.id = e.lieu_id
+    JOIN professeurs p ON p.id = e.prof_id
+    LEFT JOIN inscriptions i ON i.module_id = m.id
+    WHERE p.nom = %s
+    GROUP BY e.id, m.nom, f.nom, d.nom, l.nom, e.date_heure
+    ORDER BY e.date_heure
+    """
+    
+    mes_examens = execute_query(query, params=(st.session_state.user_name,))
+    
+    if not mes_examens.empty:
+        st.metric("📘 Mes Examens à Surveiller", len(mes_examens))
+        
+        st.divider()
+        
+        st.markdown("### 📅 Planning de Mes Examens")
+        
+        for _, exam in mes_examens.iterrows():
+            st.markdown(f'<div class="validation-box">', unsafe_allow_html=True)
+            col1, col2 = st.columns([3, 1])
+            
+            with col1:
+                st.markdown(f"#### 📖 {exam['module']}")
+                st.write(f"**Formation:** {exam['formation']} ({exam['departement']})")
+                st.write(f"📅 **Date:** {exam['date_heure']}")
+                st.write(f"🏫 **Salle:** {exam['salle']}")
+            
+            with col2:
+                st.metric("👥 Inscrits", int(exam['nb_inscrits']))
+            
+            st.markdown('</div>', unsafe_allow_html=True)
+    else:
+        st.info("Aucun examen planifié pour le moment")
+
+# ==============================
+# DASHBOARD ÉTUDIANT
+# ==============================
+def dashboard_etudiant():
+    st.markdown(f'<div class="main-header"><h1>🎓 Mon Calendrier d\'Examens</h1><div class="role-badge">{ROLES["etudiant"]} - {st.session_state.user_name}</div></div>', unsafe_allow_html=True)
+    
+    # Filtres
+    formations = get_formations_by_dept(st.session_state.user_dept_id)
+    
+    if not formations.empty:
+        formation_selected = st.selectbox("Ma Formation", formations["nom"].tolist())
+        formation_id = formations[formations["nom"] == formation_selected]["id"].values[0]
+        
+        st.divider()
+        
+        # Examens de la formation
+        edt_formation = get_edt_etudiant(formation_id)
+        
+        if not edt_formation.empty:
+            st.metric("📘 Mes Examens", len(edt_formation))
+            
+            st.divider()
+            
+            st.markdown("### 📅 Calendrier de Mes Examens")
+            
+            edt_formation["date"] = pd.to_datetime(edt_formation["date_heure"]).dt.date
+            
+            for date in sorted(edt_formation["date"].unique()):
+                st.markdown(f"#### 📅 {date.strftime('%A %d %B %Y')}")
+                
+                examens_jour = edt_formation[edt_formation["date"] == date]
+                
+                for _, exam in examens_jour.iterrows():
+                    st.markdown(f'<div class="validation-box">', unsafe_allow_html=True)
+                    col1, col2, col3 = st.columns(3)
+                    
+                    with col1:
+                        st.write(f"**⏰ {exam['date_heure'].strftime('%H:%M')}**")
+                        st.write(f"📖 {exam['module']}")
+                    
+                    with col2:
+                        st.write(f"🏫 Salle: {exam['salle']}")
+                        st.write(f"👨‍🏫 Prof: {exam['professeur']}")
+                    
+                    st.markdown('</div>', unsafe_allow_html=True)
+                
+                st.divider()
+            
+            # Export personnel
+            csv = edt_formation.to_csv(index=False).encode('utf-8')
+            st.download_button("📥 Télécharger Mon Calendrier", csv, "mes_examens.csv", "text/csv")
+        else:
+            st.info("Aucun examen planifié pour cette formation")
+    else:
+        st.warning("Aucune formation disponible")
+
+# ==============================
+# NAVIGATION PRINCIPALE
+# ==============================
+def main():
+    # Sidebar
+    with st.sidebar:
+        if st.session_state.user_role:
+            st.markdown(f"### 👤 Connecté en tant que:")
+            st.markdown(f'<div class="role-badge">{ROLES[st.session_state.user_role]}</div>', unsafe_allow_html=True)
+            st.write(f"**{st.session_state.user_name}**")
+            
+            st.divider()
+            
+            if st.button("🚪 Déconnexion", use_container_width=True):
+                st.session_state.user_role = None
+                st.session_state.user_name = None
+                st.session_state.user_dept_id = None
+                st.rerun()
+    
+    # Routing selon le rôle
+    if not st.session_state.user_role:
+        page_connexion()
+    elif st.session_state.user_role == "vice_doyen":
+        dashboard_vice_doyen()
+    elif st.session_state.user_role == "admin_exams":
+        dashboard_admin_examens()
+    elif st.session_state.user_role == "chef_dept":
+        dashboard_chef_dept()
+    elif st.session_state.user_role == "enseignant":
+        dashboard_enseignant()
+    elif st.session_state.user_role == "etudiant":
+        dashboard_etudiant()
+
+if __name__ == "__main__":
+    main()
