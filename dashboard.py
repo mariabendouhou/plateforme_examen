@@ -720,7 +720,6 @@ def dashboard_vice_doyen():
 # ==============================
 def dashboard_admin_examens():
     st.markdown(f'<div class="main-header"><h1>🛠️ Administration et Planificationallow_html=True)
-    
     # Actions principales
     st.markdown("### ⚙️ Actions de Planification")
     
