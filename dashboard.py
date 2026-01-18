@@ -12,7 +12,7 @@ DUREE_EXAM = 90
 CRENEAUX = ["08:30", "11:00", "14:00"]
 DATE_DEBUT = datetime(2026, 1, 10)
 DATE_FIN = datetime(2026, 1, 25)
-MAX_SALLES_PER_SLOT = 50   # Distribution équilibrée sur 45 créneaux
+MAX_SALLES_PER_SLOT = 50
 
 # Configuration des rôles
 ROLES = {
@@ -131,7 +131,7 @@ def execute_query(query, params=None):
         conn.close()
 
 # ==============================
-# REQUÊTES DONNÉES - OPTIMISÉES
+# REQUÊTES DONNÉES
 # ==============================
 @st.cache_data(ttl=300)
 def get_departements():
@@ -283,7 +283,26 @@ def get_heures_enseignement():
     LEFT JOIN examens e ON e.prof_id = p.id
     LEFT JOIN surveillances s ON s.prof_id = p.id
     GROUP BY p.id, p.nom, d.nom
+    HAVING nb_examens > 0
     ORDER BY heures_totales DESC
+    """
+    return execute_query(query)
+
+@st.cache_data(ttl=60)
+def get_surveillances_par_jour():
+    query = """
+    SELECT 
+        DATE(e.date_heure) AS date,
+        p.nom AS professeur,
+        d.nom AS departement,
+        COUNT(e.id) AS nb_examens_jour,
+        GROUP_CONCAT(DISTINCT TIME_FORMAT(e.date_heure, '%H:%i') ORDER BY e.date_heure SEPARATOR ', ') AS horaires
+    FROM examens e
+    JOIN professeurs p ON p.id = e.prof_id
+    JOIN departements d ON d.id = p.dept_id
+    GROUP BY DATE(e.date_heure), p.id, p.nom, d.nom
+    HAVING nb_examens_jour > 0
+    ORDER BY date, nb_examens_jour DESC
     """
     return execute_query(query)
 
@@ -318,7 +337,7 @@ def get_edt_etudiant(formation_id):
     return execute_query(query, params=(formation_id,))
 
 # ==============================
-# GÉNÉRATION EDT ULTRA-OPTIMISÉE (CORRIGÉE)
+# GÉNÉRATION EDT
 # ==============================
 def generer_edt_optimiser():
     conn = get_connection()
@@ -328,11 +347,9 @@ def generer_edt_optimiser():
     cur = conn.cursor(dictionary=True)
 
     try:
-        # 1. Nettoyer EDT existant
         cur.execute("DELETE FROM examens")
         conn.commit()
 
-        # 2. Charger TOUS les modules (avec ou sans inscriptions)
         cur.execute("""
             SELECT 
                 m.id AS module_id,
@@ -348,7 +365,6 @@ def generer_edt_optimiser():
         """)
         modules = cur.fetchall()
 
-        # 3. Charger salles et professeurs
         cur.execute("SELECT id, capacite, nom FROM lieux_examen ORDER BY capacite DESC")
         salles = cur.fetchall()
 
@@ -359,7 +375,6 @@ def generer_edt_optimiser():
             st.error("❌ Données insuffisantes")
             return 0, 0
 
-        # 4. PRÉ-CHARGEMENT des étudiants (1 seule requête au lieu de 1500)
         etudiants_par_module = {}
         cur.execute("SELECT module_id, etudiant_id FROM inscriptions")
         for row in cur.fetchall():
@@ -367,26 +382,22 @@ def generer_edt_optimiser():
                 etudiants_par_module[row['module_id']] = []
             etudiants_par_module[row['module_id']].append(row['etudiant_id'])
 
-        # 5. Interface de progression
         progress_bar = st.progress(0)
         status_text = st.empty()
 
-        # 6. Contraintes mémoire (AVEC prof_horaire ajouté)
         formation_jour = {}
         salle_horaire = {}
         etudiant_jour = {}
-        prof_horaire = {}  # NOUVEAU : Suivi occupation professeurs par créneau
+        prof_horaire = {}
         salles_occupees_par_slot = {}
         prof_exams_count = {p["id"]: 0 for p in profs}
 
         success = 0
         failed = 0
         failed_modules = []
-        exams_to_insert = []  # BATCH INSERT
+        exams_to_insert = []
 
-        # 7. ALGORITHME PRINCIPAL
         for i, module in enumerate(modules):
-            # Mise à jour progression
             progress = (i + 1) / len(modules)
             progress_bar.progress(progress)
             status_text.text(f"⏳ Planification: {module['module']} ({i+1}/{len(modules)})")
@@ -394,7 +405,6 @@ def generer_edt_optimiser():
             planifie = False
             etudiants_module = etudiants_par_module.get(module["module_id"], [])
 
-            # ROUND ROBIN pour distribution équilibrée des créneaux
             start_idx = i % len(CRENEAUX)
             creneaux_priority = CRENEAUX[start_idx:] + CRENEAUX[:start_idx]
 
@@ -404,7 +414,6 @@ def generer_edt_optimiser():
                     
                 date_exam = (DATE_DEBUT + timedelta(days=jour_offset)).date()
 
-                # 1 examen par formation par jour
                 if (module["formation_id"], date_exam) in formation_jour:
                     continue
 
@@ -414,11 +423,9 @@ def generer_edt_optimiser():
                         
                     dt = datetime.strptime(f"{date_exam} {heure}", "%Y-%m-%d %H:%M")
 
-                    # Distribution équilibrée (max 50 salles par créneau)
                     if salles_occupees_par_slot.get(dt, 0) >= MAX_SALLES_PER_SLOT:
                         continue
 
-                    # Conflit étudiants
                     if any((etud_id, date_exam) in etudiant_jour for etud_id in etudiants_module):
                         continue
 
@@ -426,29 +433,23 @@ def generer_edt_optimiser():
                         if planifie:
                             break
 
-                        # Capacité suffisante
                         if salle["capacite"] < module["nb_etudiants"]:
                             continue
 
-                        # Salle disponible
                         if (salle["id"], dt) in salle_horaire:
                             continue
 
-                        # CORRECTION : Chercher un prof disponible ET le moins chargé
                         prof_disponible = None
                         profs_tries = sorted(profs, key=lambda p: prof_exams_count[p["id"]])
                         
                         for p in profs_tries:
-                            # Vérification CRUCIALE : le prof est-il libre à cette heure ?
                             if (p["id"], dt) not in prof_horaire:
                                 prof_disponible = p
                                 break
                         
-                        # Si aucun prof n'est disponible, passer à la salle suivante
                         if not prof_disponible:
                             continue
 
-                        # AJOUT À LA LISTE (pas d'insertion immédiate)
                         exams_to_insert.append((
                             module["module_id"],
                             prof_disponible["id"],
@@ -457,9 +458,8 @@ def generer_edt_optimiser():
                             DUREE_EXAM
                         ))
 
-                        # Mise à jour contraintes
                         salle_horaire[(salle["id"], dt)] = True
-                        prof_horaire[(prof_disponible["id"], dt)] = True  # NOUVEAU : Marquer prof occupé
+                        prof_horaire[(prof_disponible["id"], dt)] = True
                         formation_jour[(module["formation_id"], date_exam)] = True
                         salles_occupees_par_slot[dt] = salles_occupees_par_slot.get(dt, 0) + 1
                         prof_exams_count[prof_disponible["id"]] += 1
@@ -474,7 +474,6 @@ def generer_edt_optimiser():
                 failed += 1
                 failed_modules.append(module["module"])
 
-        # 8. BATCH INSERT (1 seule insertion pour tout)
         if exams_to_insert:
             cur.executemany("""
                 INSERT INTO examens (module_id, prof_id, lieu_id, date_heure, duree_minutes)
@@ -485,10 +484,9 @@ def generer_edt_optimiser():
         progress_bar.empty()
         status_text.empty()
 
-        # Afficher modules non planifiés
         if failed_modules:
             with st.expander(f"⚠️ Modules non planifiés ({failed})"):
-                for mod in failed_modules[:20]:  # Limite affichage
+                for mod in failed_modules[:20]:
                     st.write(f"- {mod}")
                 if failed > 20:
                     st.write(f"... et {failed - 20} autres")
@@ -502,28 +500,6 @@ def generer_edt_optimiser():
         st.error(traceback.format_exc())
         return 0, 0
 
-    finally:
-        conn.close()
-
-# ==============================
-# FONCTIONS MÉTIER
-# ==============================
-def valider_examen(examen_id, type_validation):
-    conn = get_connection()
-    if not conn:
-        return False
-    
-    try:
-        cur = conn.cursor()
-        if type_validation == "chef":
-            cur.execute("UPDATE examens SET valide_chef = 1 WHERE id = %s", (examen_id,))
-        elif type_validation == "doyen":
-            cur.execute("UPDATE examens SET valide_doyen = 1 WHERE id = %s", (examen_id,))
-        conn.commit()
-        return True
-    except Exception as e:
-        st.error(f"❌ Erreur validation : {e}")
-        return False
     finally:
         conn.close()
 
@@ -667,9 +643,26 @@ def dashboard_vice_doyen():
     
     if not heures.empty:
         fig = px.scatter(heures, x="nb_examens", y="heures_totales", size="nb_surveillances", 
-                        color="departement", hover_name="professeur")
+                        color="departement", hover_name="professeur",
+                        title="Charge de travail des professeurs")
         st.plotly_chart(fig, use_container_width=True)
         st.dataframe(heures, use_container_width=True)
+    else:
+        st.info("Aucune donnée de charge de travail disponible")
+    
+    st.divider()
+    
+    st.markdown("### 📅 Surveillances des Professeurs par Jour")
+    surveillances = get_surveillances_par_jour()
+    
+    if not surveillances.empty:
+        fig = px.bar(surveillances, x="date", y="nb_examens_jour", color="departement",
+                    hover_data=["professeur", "horaires"], 
+                    title="Nombre d'examens surveillés par professeur et par jour")
+        st.plotly_chart(fig, use_container_width=True)
+        st.dataframe(surveillances, use_container_width=True)
+    else:
+        st.info("Aucune donnée de surveillance disponible")
 
 def dashboard_admin_examens():
     st.markdown(f'<div class="main-header"><h1>🛠️ Administration et Planification</h1><div class="role-badge">{ROLES["admin_exams"]} - {st.session_state.user_name}</div></div>', unsafe_allow_html=True)
@@ -699,6 +692,24 @@ def dashboard_admin_examens():
                 st.cache_data.clear()
                 st.rerun()
     
+    with col2:
+        if st.button("🔄 Actualiser Données", use_container_width=True):
+            st.cache_data.clear()
+            st.success("✅ Données actualisées")
+            st.rerun()
+    
+    with col3:
+        if st.button("🗑️ Réinitialiser EDT", use_container_width=True):
+            conn = get_connection()
+            if conn:
+                cur = conn.cursor()
+                cur.execute("DELETE FROM examens")
+                conn.commit()
+                conn.close()
+                st.success("✅ EDT réinitialisé")
+                st.cache_data.clear()
+                st.rerun()
+    
     st.divider()
     
     st.markdown("### 📋 Emploi du Temps Complet")
@@ -711,7 +722,7 @@ def dashboard_admin_examens():
         col2.metric("Départements", edt["departement"].nunique())
         col3.metric("Formations", edt["formation"].nunique())
         
-        st.dataframe(edt, use_container_width=True, height=400)
+        st.dataframe(edt, use_container_width=True
         
         csv = edt.to_csv(index=False).encode('utf-8')
         st.download_button("📥 Télécharger CSV", csv, "edt_complet.csv", "text/csv")
