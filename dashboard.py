@@ -318,7 +318,7 @@ def get_edt_etudiant(formation_id):
     return execute_query(query, params=(formation_id,))
 
 # ==============================
-# GÉNÉRATION EDT ULTRA-OPTIMISÉE
+# GÉNÉRATION EDT ULTRA-OPTIMISÉE (CORRIGÉE)
 # ==============================
 def generer_edt_optimiser():
     conn = get_connection()
@@ -371,10 +371,11 @@ def generer_edt_optimiser():
         progress_bar = st.progress(0)
         status_text = st.empty()
 
-        # 6. Contraintes mémoire
+        # 6. Contraintes mémoire (AVEC prof_horaire ajouté)
         formation_jour = {}
         salle_horaire = {}
         etudiant_jour = {}
+        prof_horaire = {}  # NOUVEAU : Suivi occupation professeurs par créneau
         salles_occupees_par_slot = {}
         prof_exams_count = {p["id"]: 0 for p in profs}
 
@@ -413,7 +414,7 @@ def generer_edt_optimiser():
                         
                     dt = datetime.strptime(f"{date_exam} {heure}", "%Y-%m-%d %H:%M")
 
-                    # Distribution équilibrée (max 35 salles par créneau)
+                    # Distribution équilibrée (max 50 salles par créneau)
                     if salles_occupees_par_slot.get(dt, 0) >= MAX_SALLES_PER_SLOT:
                         continue
 
@@ -433,13 +434,24 @@ def generer_edt_optimiser():
                         if (salle["id"], dt) in salle_horaire:
                             continue
 
-                        # Prof le moins chargé
-                        prof_trouve = sorted(profs, key=lambda p: prof_exams_count[p["id"]])[0]
+                        # CORRECTION : Chercher un prof disponible ET le moins chargé
+                        prof_disponible = None
+                        profs_tries = sorted(profs, key=lambda p: prof_exams_count[p["id"]])
+                        
+                        for p in profs_tries:
+                            # Vérification CRUCIALE : le prof est-il libre à cette heure ?
+                            if (p["id"], dt) not in prof_horaire:
+                                prof_disponible = p
+                                break
+                        
+                        # Si aucun prof n'est disponible, passer à la salle suivante
+                        if not prof_disponible:
+                            continue
 
                         # AJOUT À LA LISTE (pas d'insertion immédiate)
                         exams_to_insert.append((
                             module["module_id"],
-                            prof_trouve["id"],
+                            prof_disponible["id"],
                             salle["id"],
                             dt,
                             DUREE_EXAM
@@ -447,9 +459,10 @@ def generer_edt_optimiser():
 
                         # Mise à jour contraintes
                         salle_horaire[(salle["id"], dt)] = True
+                        prof_horaire[(prof_disponible["id"], dt)] = True  # NOUVEAU : Marquer prof occupé
                         formation_jour[(module["formation_id"], date_exam)] = True
                         salles_occupees_par_slot[dt] = salles_occupees_par_slot.get(dt, 0) + 1
-                        prof_exams_count[prof_trouve["id"]] += 1
+                        prof_exams_count[prof_disponible["id"]] += 1
                         
                         for etud_id in etudiants_module:
                             etudiant_jour[(etud_id, date_exam)] = True
@@ -574,7 +587,6 @@ def page_connexion():
                     st.session_state.user_name = "Étudiant"
                     st.session_state.user_dept_id = formation_data["dept_id"]
                     st.rerun()
-
 # ==============================
 # DASHBOARDS
 # ==============================
