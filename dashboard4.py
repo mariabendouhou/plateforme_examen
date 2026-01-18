@@ -798,16 +798,15 @@ def dashboard_enseignant():
         
         for _, exam in mes_examens.iterrows():
             st.markdown(f'<div class="validation-box">', unsafe_allow_html=True)
-            col1, col2 = st.columns([3, 1])
+            col1, col2 = st.columns([2, 1])
             
             with col1:
                 st.markdown(f"#### 📖 {exam['module']}")
                 st.write(f"**Formation:** {exam['formation']} ({exam['departement']})")
                 st.write(f"📅 **Date:** {exam['date_heure']}")
-                st.write(f"🏫 **Salle:** {exam['salle']}")
             
             with col2:
-                st.metric("👥 Inscrits", int(exam['nb_inscrits']))
+                 st.write(f"🏫 **Salle:** {exam['salle']}")
                 
             st.markdown('</div>', unsafe_allow_html=True)
     else:
@@ -894,6 +893,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
