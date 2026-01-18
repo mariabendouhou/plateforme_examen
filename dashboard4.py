@@ -807,7 +807,6 @@ def dashboard_enseignant():
                 st.write(f"🏫 **Salle:** {exam['salle']}")
             
             with col2:
-                st.metric("👥 Inscrits", int(exam['nb_inscrits']))
             
             st.markdown('</div>', unsafe_allow_html=True)
     else:
@@ -894,4 +893,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
