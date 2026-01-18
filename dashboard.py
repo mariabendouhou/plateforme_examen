@@ -332,17 +332,17 @@ def generer_edt_optimiser():
         cur.execute("DELETE FROM examens")
         conn.commit()
 
-        # 2. Charger modules (seulement avec inscriptions)
+        # 2. Charger TOUS les modules (avec ou sans inscriptions)
         cur.execute("""
             SELECT 
                 m.id AS module_id,
                 m.nom AS module,
                 f.id AS formation_id,
                 f.dept_id AS dept_id,
-                COUNT(DISTINCT i.etudiant_id) AS nb_etudiants
+                COALESCE(COUNT(DISTINCT i.etudiant_id), 1) AS nb_etudiants
             FROM modules m
             JOIN formations f ON f.id = m.formation_id
-            INNER JOIN inscriptions i ON i.module_id = m.id
+            LEFT JOIN inscriptions i ON i.module_id = m.id
             GROUP BY m.id, m.nom, f.id, f.dept_id
             ORDER BY nb_etudiants DESC
         """)
