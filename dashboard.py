@@ -889,21 +889,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-                st.rerun()
-    
-    with col2:
-        if st.button("🔄 Actualiser Données", use_container_width=True):
-            st.cache_data.clear()
-            st.success("✅ Données actualisées")
-            st.rerun()
-    
-    with col3:
-        if st.button("🗑️ Réinitialiser EDT", use_container_width=True):
-            conn = get_connection()
-            if conn:
-                cur = conn.cursor()
-                cur.execute("DELETE FROM examens")
-                conn.commit()
-                conn.close()
-                st.success("✅ EDT réinitialisé")
-                st.cache_data.clear()
