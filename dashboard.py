@@ -617,7 +617,7 @@ def dashboard_vice_doyen():
     
     with col2:
         st.markdown('<div class="kpi-container">', unsafe_allow_html=True)
-        st.metric("⚠️ Conflits Professeurs", 0)
+        st.metric("⚠️ Conflits Professeurs",int(kpis["nb_conflits_profs"]))
         st.markdown('</div>', unsafe_allow_html=True)
     
     st.divider()
