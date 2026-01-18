@@ -14,6 +14,7 @@ DUREE_EXAM = 90
 CRENEAUX = ["08:30", "11:00", "14:00"]
 DATE_DEBUT = datetime(2026, 1, 10)
 DATE_FIN = datetime(2026, 1, 25)
+MAX_SALLES_PER_SLOT = 35
 
 # Configuration des rôles
 ROLES = {
@@ -371,181 +372,111 @@ def valider_examen(examen_id, type_validation):
 
 def generer_edt_optimiser():
     conn = get_connection()
-    if not conn:
-        return 0, 0
-
+    if not conn: return 0, 0
     cur = conn.cursor(dictionary=True)
 
     try:
-        # Nettoyer l'EDT existant
+        # 1. Nettoyage
         cur.execute("DELETE FROM examens")
         conn.commit()
 
-        # Charger modules avec formation, département et promo + nombre d'étudiants
+        # 2. Chargement des données (Modules avec inscrits seulement)
         cur.execute("""
-            SELECT 
-                m.id AS module_id,
-                m.nom AS module,
-                f.id AS formation_id,
-                f.dept_id AS dept_id,
-                COALESCE(MIN(e.promo), 2024) AS promo,
-                COUNT(DISTINCT i.etudiant_id) AS nb_etudiants
+            SELECT m.id AS module_id, m.nom AS module, f.id AS formation_id, 
+                   COUNT(i.etudiant_id) AS nb_etudiants
             FROM modules m
             JOIN formations f ON f.id = m.formation_id
-            LEFT JOIN inscriptions i ON i.module_id = m.id
-            LEFT JOIN etudiants e ON e.id = i.etudiant_id
-            GROUP BY m.id, m.nom, f.id, f.dept_id
-            ORDER BY nb_etudiants DESC
+            INNER JOIN inscriptions i ON i.module_id = m.id
+            GROUP BY m.id ORDER BY nb_etudiants DESC
         """)
         modules = cur.fetchall()
-
-        # Salles par capacité
+        
         cur.execute("SELECT id, capacite, nom FROM lieux_examen ORDER BY capacite DESC")
         salles = cur.fetchall()
-
-        # Professeurs par département
-        cur.execute("SELECT id, dept_id, nom FROM professeurs ORDER BY dept_id")
+        
+        cur.execute("SELECT id, nom FROM professeurs")
         profs = cur.fetchall()
 
-        if not modules or not salles or not profs:
-            st.error("❌ Données insuffisantes (modules / salles / professeurs)")
-            return 0, 0
-
-        success = 0
-        failed = 0
-        failed_modules = []
-
-        # Mémoire pour contraintes
-        formation_jour = {}
-        salle_jour_promo_formation = {}
-        prof_jour = {}
-        etudiant_jour = {}
-        salle_horaire = {}
-        
-        # Compteur global d'examens par professeur pour équité
-        prof_exams_count = {prof["id"]: 0 for prof in profs}
-
-        # Charger les étudiants par module
+        # 3. Pré-filtrage des étudiants (Gestion des 13,000)
         etudiants_par_module = {}
-        for module in modules:
-            cur.execute("""
-                SELECT etudiant_id 
-                FROM inscriptions 
-                WHERE module_id = %s
-            """, (module["module_id"],))
-            etudiants_par_module[module["module_id"]] = [r["etudiant_id"] for r in cur.fetchall()]
+        cur.execute("SELECT module_id, etudiant_id FROM inscriptions")
+        for row in cur.fetchall():
+            if row['module_id'] not in etudiants_par_module:
+                etudiants_par_module[row['module_id']] = []
+            etudiants_par_module[row['module_id']].append(row['etudiant_id'])
 
-        for module in modules:
+        # 4. Suivi Progrès
+        progress_bar = st.progress(0)
+        status_text = st.empty()
+        
+        # 5. Mémoire Constraints
+        formation_jour = {}
+        salle_horaire = {}
+        etudiant_jour = {}
+        salles_occupees_par_slot = {}
+        prof_exams_count = {p["id"]: 0 for p in profs}
+        
+        success, failed = 0, 0
+        exams_to_insert = []
+
+        # 6. Algorithme de Distribution
+        for i, module in enumerate(modules):
+            progress = (i + 1) / len(modules)
+            progress_bar.progress(progress)
+            status_text.text(f"⏳ Programmation: {module['module']} ({i+1}/{len(modules)})")
+
             planifie = False
-            etudiants_module = etudiants_par_module.get(module["module_id"], [])
+            # Round-Robin pour éviter la saturation de 08:30
+            start_idx = i % len(CRENEAUX)
+            priority_slots = CRENEAUX[start_idx:] + CRENEAUX[:start_idx]
 
-            # 🔥 FIX: Boucle sur TOUS les jours
             for jour_offset in range((DATE_FIN - DATE_DEBUT).days + 1):
-                if planifie:
-                    break
-                    
+                if planifie: break
                 date_exam = (DATE_DEBUT + timedelta(days=jour_offset)).date()
 
-                # 1 examen par formation par jour
-                if (module["formation_id"], date_exam) in formation_jour:
-                    continue
+                if (module["formation_id"], date_exam) in formation_jour: continue
 
-                # 🔥 FIX: Boucle sur TOUS les créneaux horaires
-                for heure in CRENEAUX:
-                    if planifie:
-                        break
-                        
+                for heure in priority_slots:
+                    if planifie: break
                     dt = datetime.strptime(f"{date_exam} {heure}", "%Y-%m-%d %H:%M")
 
-                    # Vérifier conflits étudiants
-                    conflit_etudiant = any((etud_id, date_exam) in etudiant_jour for etud_id in etudiants_module)
-                    if conflit_etudiant:
-                        continue
+                    if salles_occupees_par_slot.get(dt, 0) >= MAX_SALLES_PER_SLOT: continue
 
-                    # 🔥 FIX: Tester TOUTES les salles pour ce créneau
+                    etuds = etudiants_par_module.get(module["module_id"], [])
+                    if any((e_id, date_exam) in etudiant_jour for e_id in etuds): continue
+
                     for salle in salles:
-                        if planifie:
-                            break
+                        if salle["capacite"] < module["nb_etudiants"]: continue
+                        if (salle["id"], dt) in salle_horaire: continue
 
-                        # Capacité suffisante
-                        if salle["capacite"] < module["nb_etudiants"]:
-                            continue
+                        prof_trouve = sorted(profs, key=lambda p: prof_exams_count[p["id"]])[0]
 
-                        # Salle pour une seule formation/promo par jour
-                        salle_key = (salle["id"], date_exam)
-                        if salle_key in salle_jour_promo_formation:
-                            existing_promo, existing_formation = salle_jour_promo_formation[salle_key]
-                            if existing_promo != module["promo"] or existing_formation != module["formation_id"]:
-                                continue
-
-                        # Disponibilité horaire
-                        if (salle["id"], dt) in salle_horaire:
-                            continue
-
-                        # Trouver prof disponible avec distribution équitable
-                        prof_trouve = None
-                        profs_tries = sorted(profs, key=lambda p: prof_exams_count[p["id"]])
+                        exams_to_insert.append((module["module_id"], prof_trouve["id"], salle["id"], dt, DUREE_EXAM))
                         
-                        for prof in profs_tries:
-                            nb_exams_prof = prof_jour.get((prof["id"], date_exam), 0)
-                            if nb_exams_prof < 3:  # Max 3 examens par jour
-                                prof_trouve = prof
-                                break
+                        salle_horaire[(salle["id"], dt)] = True
+                        formation_jour[(module["formation_id"], date_exam)] = True
+                        salles_occupees_par_slot[dt] = salles_occupees_par_slot.get(dt, 0) + 1
+                        prof_exams_count[prof_trouve["id"]] += 1
+                        for e_id in etuds: etudiant_jour[(e_id, date_exam)] = True
                         
-                        if not prof_trouve:
-                            continue
+                        planifie = True
+                        success += 1
+                        break
+            
+            if not planifie: failed += 1
 
-                        # INSERTION
-                        try:
-                            cur.execute("""
-                                INSERT INTO examens
-                                (module_id, prof_id, lieu_id, date_heure, duree_minutes)
-                                VALUES (%s, %s, %s, %s, %s)
-                            """, (
-                                module["module_id"],
-                                prof_trouve["id"],
-                                salle["id"],
-                                dt,
-                                DUREE_EXAM
-                            ))
-                            conn.commit()
+        # 7. Insertion Groupée (Batch)
+        if exams_to_insert:
+            cur.executemany("INSERT INTO examens (module_id, prof_id, lieu_id, date_heure, duree_minutes) VALUES (%s, %s, %s, %s, %s)", exams_to_insert)
+            conn.commit()
 
-                            # Mise à jour contraintes
-                            formation_jour[(module["formation_id"], date_exam)] = True
-                            salle_jour_promo_formation[salle_key] = (module["promo"], module["formation_id"])
-                            prof_jour[(prof_trouve["id"], date_exam)] = prof_jour.get((prof_trouve["id"], date_exam), 0) + 1
-                            prof_exams_count[prof_trouve["id"]] += 1
-                            salle_horaire[(salle["id"], dt)] = True
-                            
-                            for etud_id in etudiants_module:
-                                etudiant_jour[(etud_id, date_exam)] = True
-
-                            success += 1
-                            planifie = True
-                            
-                        except mysql.connector.Error:
-                            conn.rollback()
-                            continue
-
-            if not planifie:
-                failed += 1
-                failed_modules.append(module["module"])
-
-        # Afficher modules non planifiés
-        if failed_modules:
-            with st.expander(f"⚠️ Modules non planifiés ({failed})"):
-                for mod in failed_modules:
-                    st.write(f"- {mod}")
-
+        progress_bar.empty()
+        status_text.empty()
         return success, failed
 
     except Exception as e:
-        conn.rollback()
-        st.error(f"❌ Erreur génération EDT : {e}")
-        import traceback
-        st.error(traceback.format_exc())
+        st.error(f"❌ Erreur: {e}")
         return 0, 0
-
     finally:
         conn.close()
 
