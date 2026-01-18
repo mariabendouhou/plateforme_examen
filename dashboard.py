@@ -11,8 +11,8 @@ import plotly.graph_objects as go
 DUREE_EXAM = 90
 CRENEAUX = ["08:30", "11:00", "14:00"]
 DATE_DEBUT = datetime(2026, 1, 10)
-DATE_FIN = datetime(2026, 1, 25)
-MAX_SALLES_PER_SLOT = 35  # Distribution équilibrée sur 45 créneaux
+DATE_FIN = datetime(2026, 1, 20)
+MAX_SALLES_PER_SLOT = 40   # Distribution équilibrée sur 45 créneaux
 
 # Configuration des rôles
 ROLES = {
