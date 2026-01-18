@@ -587,6 +587,7 @@ def page_connexion():
                     st.session_state.user_name = "Étudiant"
                     st.session_state.user_dept_id = formation_data["dept_id"]
                     st.rerun()
+
 # ==============================
 # DASHBOARDS
 # ==============================
@@ -629,7 +630,7 @@ def dashboard_vice_doyen():
     
     with col2:
         st.markdown('<div class="kpi-container">', unsafe_allow_html=True)
-        st.metric("⚠️ Conflits Professeurs",int(kpis["nb_conflits_profs"]))
+        st.metric("⚠️ Conflits Professeurs", int(kpis["nb_conflits_profs"]))
         st.markdown('</div>', unsafe_allow_html=True)
     
     st.divider()
@@ -695,24 +696,6 @@ def dashboard_admin_examens():
                 else:
                     st.balloons()
                     
-                st.cache_data.clear()
-                st.rerun()
-    
-    with col2:
-        if st.button("🔄 Actualiser Données", use_container_width=True):
-            st.cache_data.clear()
-            st.success("✅ Données actualisées")
-            st.rerun()
-    
-    with col3:
-        if st.button("🗑️ Réinitialiser EDT", use_container_width=True):
-            conn = get_connection()
-            if conn:
-                cur = conn.cursor()
-                cur.execute("DELETE FROM examens")
-                conn.commit()
-                conn.close()
-                st.success("✅ EDT réinitialisé")
                 st.cache_data.clear()
                 st.rerun()
     
@@ -906,3 +889,21 @@ def main():
 
 if __name__ == "__main__":
     main()
+                st.rerun()
+    
+    with col2:
+        if st.button("🔄 Actualiser Données", use_container_width=True):
+            st.cache_data.clear()
+            st.success("✅ Données actualisées")
+            st.rerun()
+    
+    with col3:
+        if st.button("🗑️ Réinitialiser EDT", use_container_width=True):
+            conn = get_connection()
+            if conn:
+                cur = conn.cursor()
+                cur.execute("DELETE FROM examens")
+                conn.commit()
+                conn.close()
+                st.success("✅ EDT réinitialisé")
+                st.cache_data.clear()
